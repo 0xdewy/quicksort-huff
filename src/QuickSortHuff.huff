@@ -1,0 +1,208 @@
+#define function sort(uint256[]) pure returns (uint256[])
+#define function returnArray(uint256[]) pure returns (uint256[])
+
+
+#define macro UINT_MAX() = takes(0) returns(1) {
+    0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+}
+
+#define macro SAFE_SUB1() = takes(1) returns(1) {
+    // Inital stack: [uint]
+    dup1 iszero     // [uint == 0, uint]
+    skip jumpi   
+    UINT_MAX()
+    add
+
+    skip:            // [uint]
+}
+
+#define macro SUB1() = takes(1) returns(1) {
+   UINT_MAX()
+   add
+}
+
+#define macro SUB4() = takes(1) returns(1) {
+    0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD
+    add
+}
+
+#define macro ARRAY_MEMORY_SLOT() = takes(0) returns(1)  {
+   0x00
+}
+
+#define macro ITEM_OFFSET() = takes(1) returns (1) {
+    // [index]
+    0x05 shl          // [index * 32]
+    0x40 add
+}
+
+#define macro GET_ITEM() = takes(1) returns (1) {
+    // [index]
+    ITEM_OFFSET()
+    mload                       // [item]
+}
+
+#define macro GET_ITEM_AND_OFFSET() = takes(1) returns (2) {
+    // [index]
+    ITEM_OFFSET()
+    dup1 mload              // [item, offset]
+}
+
+#define macro SWAP_ITEMS() = takes(2) returns (2) {
+    // [a,b]
+    dup1 GET_ITEM_AND_OFFSET()       // [arr[a], offsetA, a, b ]
+    dup4 GET_ITEM_AND_OFFSET()       // [arr[b], offsetB, arr[a], offsetA, a, b]
+    swap2 swap1                      // [offsetB, arr[a], arr[b], offsetA, ]
+    // arr[b] = arr[a]     
+    mstore                           // [arr[b], offsetA, ]
+    swap1                            // [offsetA, arr[b], ]
+    // arr[a] = arr[b]
+    mstore                           // []
+}
+
+#define macro RETURN_ARRAY() = takes(0) returns (0) {
+    calldatasize ARRAY_MEMORY_SLOT() return
+}
+
+#define macro IS_FINISHED() = takes(1) returns (1) {
+    dup1 END_OPS() eq iszero not_finished jumpi
+    RETURN_ARRAY()
+
+    not_finished:
+}
+
+#define macro END_OPS() = takes(1) returns(1) {
+    0xFFFFFFFFFBEEFFFFFFFFFFFFFFF
+}
+
+
+#define macro SORT() = takes(0) returns (0) {
+    // // Store array in memory
+    calldatasize      // [numBytes]
+    0x04 ARRAY_MEMORY_SLOT() // [memTo, calldataFrom, numBytes]
+    calldatacopy
+    // Flag to signal end of stack
+    // TODO: store counter to signal when recursion is done
+    END_OPS()
+    // Load array length
+    0x20 mload                // [length]
+    // If array length < 2 no sorting required. return array
+    dup1 0x02 gt return_array jumpi
+    SUB1()  // [right]     (length - 1)
+    0x00                // [left, right]
+
+    quicksort jump
+
+    return_array:
+        RETURN_ARRAY()
+
+
+    // 0x005c
+    quicksort:   // [left, right, END]
+
+        IS_FINISHED()          // []
+        // uint pivot = arr[uint(left + (right - left) / 2)];
+        dup2 dup2    // [left, right, left, right]
+        swap1        // [right, left, left, right]
+        sub         // [right - left, left, right]
+        0x01 shr dup2 add  //[right-left / 2 + left, left, fight]
+        GET_ITEM()    // [pivot, left, right]
+
+        // int i = left;
+        dup2      // [i, pivot, left, right, END]
+        // int j = right;
+        dup4      // [j, i, pivot, left, right, END]
+
+        // if(i==j) return;
+        // TODO: its never reaching this point
+        // dup2 dup2 eq end_recursion jumpi
+        increment_i jump
+
+
+    // end_recursion:
+    //     stop
+    //     pop pop pop pop pop    // [END] 
+    //     quicksort jump 
+
+
+    //     while (arr[i] < pivot) i++;
+    // 0x0099
+    increment_i:  // [j, i, pivot, left, right]
+        dup2 GET_ITEM()   // [arr[i], j, i, pivot, left, right]
+        dup4 swap1             // [arr[i], pivot, j, i, pivot, left, right]
+        lt iszero decrement_j jumpi
+        // i++
+        swap1 0x01 add            // [i++, j, pivot, left, right]
+        swap1                     // [j, i, pivot, left, right]
+        increment_i jump
+
+
+
+    // 0x00b0
+    //     while (pivot < arr[uint(j)]) j--;
+    decrement_j:        // [j, i, pivot, left, right]
+        dup1 GET_ITEM()           // [arr[j], j, i, pivot, left, right]
+        dup4                // [pivot, arr[j], j, i, pivot, left, right]
+        lt j_minus_minus jumpi       // [j, i, pivot, left, right]
+
+        // check_for_swap jump
+        dup1 dup3             // [i, j, j, i, pivot, left, right]
+        //     if (i <= j) {
+        gt add_to_stack_right jumpi
+
+        //         (arr[uint(i)], arr[uint(j)]) = (arr[uint(j)], arr[uint(i)]);
+        SWAP_ITEMS()          // [j, i, pivot, left, right]
+
+        //         j--;
+        SAFE_SUB1() swap1      // [i, j--, pivot, left, right]
+
+        //         i++;
+        0x01 add swap1        // [j--, i++, pivot, left, right]
+
+        increment_i jump
+
+    j_minus_minus:
+        // j--
+        SAFE_SUB1()                     // [j--, i, pivot, left, right]
+        decrement_j jump
+
+
+
+    // 0x0128
+    add_to_stack_right:   //[j, i, pivot left, right]
+        // if (i < right)
+        dup5 dup3         // [i, right, j, i, pivot, left, right]
+        lt push_stack jumpi  // [j, i, pivot, left, right]
+        swap4                    // [right, i, pivot, left, j]
+        pop pop pop              // [left, j]
+        add_to_stack_left jump
+
+
+    // 0x0139
+    push_stack:         // [j, i, pivot, left, right]
+        //     quickSort(arr, i, right);
+        swap2               // [pivot, i, j, left, right]
+        pop                // [i, j, left, right]
+        swap2               // [left, j, i, right]
+        add_to_stack_left jump
+
+    
+    // 0x0141
+    add_to_stack_left:   // [left, j]
+        // if (left < j)
+        // If less, keep [left, j] on the stack
+        dup2 dup2            // [left, j, left, j]
+        lt quicksort jumpi   // [left, j] 
+        pop pop
+        quicksort jump
+
+}
+
+#define macro MAIN() = takes(0) returns(0) {
+    0x00 calldataload 0xE0 shr
+
+    dup1 __FUNC_SIG(sort)       eq  sortJump    jumpi
+
+    sortJump:
+        SORT()
+}
