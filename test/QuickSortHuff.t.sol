@@ -16,7 +16,6 @@ interface QuickSortHuff {
 }
 
 contract ContractTest is Test, Constants {
-    // Contest private contest;
     QuickSortHuff private quickSortHuff;
     QuickSortHuff private dsSort;
 
@@ -40,14 +39,12 @@ contract ContractTest is Test, Constants {
     function deployQuickSort() public {
         string[] memory inputs = new string[](3);
         inputs[0] = "huffc";
-        inputs[1] = "./src/QuickSortHuff.huff";
+        inputs[1] = "./src/QuickSort.huff";
         inputs[2] = "--bytecode";
         bytes memory bytecode = vm.ffi(inputs);
         if (bytecode.length == 0) {
             revert("Could not find bytecode");
         }
-        // console.logBytes(bytecode);
-
         assembly {
             sstore(sort.slot, create(0, add(bytecode, 0x20), mload(bytecode)))
         }
@@ -88,12 +85,15 @@ contract ContractTest is Test, Constants {
     }
 
     function testNoItem() public {
-        quickSortHuff.sort(customList);
+        uint[] memory res = quickSortHuff.sort(customList);
+        assertEq(res.length, 0);
     }
 
     function testSingleItem() public {
         customList.push(1);
-        quickSortHuff.sort(customList);
+        uint[] memory res = quickSortHuff.sort(customList);
+        assertEq(res[0], customList[0]);
+        assertEq(res.length, 1);
     }
 
     function testQuickSortHuffFuzz(uint[] memory list) public {
@@ -101,7 +101,7 @@ contract ContractTest is Test, Constants {
         ensureCorrectOrder(res);
     }
 
-    function testCompareHuffAndOriginalPass(uint[] memory list) public {
+    function testCompareHuffAndOriginal(uint[] memory list) public {
         uint[] memory res2 = quickSortHuff.sort(list);
         if (list.length > 1) {
             uint[] memory res = dsSort.sort(list);
