@@ -2,7 +2,6 @@
 pragma solidity ^0.8.0;
 
 import "forge-std/Test.sol";
-
 import {Constants} from "./Data.sol";
 import {HuffDeployer} from "foundry-huff/HuffDeployer.sol";
 import {DsSort} from "../src/DsSort.sol";
@@ -19,16 +18,12 @@ contract ContractTest is Test, Constants {
     QuickSortHuff private quickSortHuff;
     QuickSortHuff private dsSort;
 
-    uint lowestGas = 280000; // Dssort
-    address sort;
-
     uint[] randomListSmall;
     uint[] randomListLarge;
     uint256[] reverseListLarge;
     uint[] customList;
 
     event GasUsed(uint amount, string algorithm);
-    event List(uint[] list);
 
     function ensureCorrectOrder(uint[] memory list) public {
         for (uint i = 1; i < list.length; i++) {
@@ -36,27 +31,9 @@ contract ContractTest is Test, Constants {
         }
     }
 
-    function deployQuickSort() public {
-        string[] memory inputs = new string[](3);
-        inputs[0] = "huffc";
-        inputs[1] = "./src/QuickSort.huff";
-        inputs[2] = "--bytecode";
-        bytes memory bytecode = vm.ffi(inputs);
-        if (bytecode.length == 0) {
-            revert("Could not find bytecode");
-        }
-        assembly {
-            sstore(sort.slot, create(0, add(bytecode, 0x20), mload(bytecode)))
-        }
-        if (address(sort) == address(0)) {
-            console.logBytes(bytecode);
-            revert("Could not deploy address");
-        }
-    }
-
     function setUp() public {
-        deployQuickSort();
-        quickSortHuff = QuickSortHuff(sort);
+        address huffsort = HuffDeployer.deploy("QuickSort");
+        quickSortHuff = QuickSortHuff(huffsort);
         dsSort = QuickSortHuff(address(new DsSort()));
 
         randomListSmall = randomishList(10, 6);
