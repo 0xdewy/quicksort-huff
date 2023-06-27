@@ -5,28 +5,24 @@ import "forge-std/Test.sol";
 import {Constants} from "./Data.sol";
 import {HuffDeployer} from "foundry-huff/HuffDeployer.sol";
 import {DsSort} from "../src/DsSort.sol";
-import {InsertionSort} from "../src/InsertionSort.sol";
 
 interface QuickSortHuff {
-    function sort(uint256[] calldata array)
-        external
-        view
-        returns (uint256[] memory);
+    function sort(uint256[] calldata array) external view returns (uint256[] memory);
 }
 
 contract ContractTest is Test, Constants {
     QuickSortHuff private quickSortHuff;
     QuickSortHuff private dsSort;
 
-    uint[] randomListSmall;
-    uint[] randomListLarge;
+    uint256[] randomListSmall;
+    uint256[] randomListLarge;
     uint256[] reverseListLarge;
-    uint[] customList;
+    uint256[] customList;
 
-    event GasUsed(uint amount, string algorithm);
+    event GasUsed(uint256 amount, string algorithm);
 
-    function ensureCorrectOrder(uint[] memory list) public {
-        for (uint i = 1; i < list.length; i++) {
+    function ensureCorrectOrder(uint256[] memory list) public {
+        for (uint256 i = 1; i < list.length; i++) {
             assertLe(list[i - 1], list[i]);
         }
     }
@@ -47,42 +43,42 @@ contract ContractTest is Test, Constants {
     }
 
     function testQuickSortHuff() public {
-        uint gasBefore = gasleft();
+        uint256 gasBefore = gasleft();
         uint256[] memory reverseSorted = quickSortHuff.sort(reverseListLarge);
-        uint gasAfter = gasBefore - gasleft();
+        uint256 gasAfter = gasBefore - gasleft();
         emit GasUsed(gasAfter, "HuffQuickSort::reverse");
         ensureCorrectOrder(reverseSorted);
     }
 
     function testQuickSort() public {
-        uint gasBefore = gasleft();
+        uint256 gasBefore = gasleft();
         dsSort.sort(reverseListLarge);
-        uint gasAfter = gasBefore - gasleft();
+        uint256 gasAfter = gasBefore - gasleft();
         emit GasUsed(gasAfter, "DsSort::reverse");
     }
 
     function testNoItem() public {
-        uint[] memory res = quickSortHuff.sort(customList);
+        uint256[] memory res = quickSortHuff.sort(customList);
         assertEq(res.length, 0);
     }
 
     function testSingleItem() public {
         customList.push(1);
-        uint[] memory res = quickSortHuff.sort(customList);
+        uint256[] memory res = quickSortHuff.sort(customList);
         assertEq(res[0], customList[0]);
         assertEq(res.length, 1);
     }
 
-    function testQuickSortHuffFuzz(uint[] memory list) public {
+    function testQuickSortHuffFuzz(uint256[] memory list) public {
         uint256[] memory res = quickSortHuff.sort(list);
         ensureCorrectOrder(res);
     }
 
-    function testCompareHuffAndOriginal(uint[] memory list) public {
-        uint[] memory res2 = quickSortHuff.sort(list);
+    function testCompareHuffAndOriginal(uint256[] memory list) public {
+        uint256[] memory res2 = quickSortHuff.sort(list);
         if (list.length > 1) {
-            uint[] memory res = dsSort.sort(list);
-            for (uint i = 0; i < res.length; i++) {
+            uint256[] memory res = dsSort.sort(list);
+            for (uint256 i = 0; i < res.length; i++) {
                 assertEq(res[i], res2[i]);
             }
         }
