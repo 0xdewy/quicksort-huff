@@ -1,0 +1,7 @@
+ContractTest:testCompareHuffAndOriginal(uint256[]) (runs: 256, μ: 479547, ~: 475549)
+ContractTest:testNoItem() (gas: 8078)
+ContractTest:testQuickSort() (gas: 4044484)
+ContractTest:testQuickSortHuff() (gas: 3473538)
+ContractTest:testQuickSortHuffFuzz(uint256[]) (runs: 256, μ: 201071, ~: 199716)
+ContractTest:testRandomSmall() (gas: 38039)
+ContractTest:testSingleItem() (gas: 50929)
