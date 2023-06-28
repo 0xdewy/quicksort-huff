@@ -4,5 +4,6 @@ out = 'out'
 libs = ['lib']
 ffi = true
 fuzz-runs = 256
+evm_version = "shanghai"
 
 # See more config options https://github.com/foundry-rs/foundry/tree/master/config

@@ -7,10 +7,12 @@ import {HuffDeployer} from "foundry-huff/HuffDeployer.sol";
 import {DsSort} from "../src/DsSort.sol";
 
 interface QuickSortHuff {
-    function sort(uint256[] calldata array) external view returns (uint256[] memory);
+    function sort(
+        uint256[] calldata array
+    ) external view returns (uint256[] memory);
 }
 
-contract ContractTest is Test, Constants {
+contract QuicksortHuffTest is Test, Constants {
     QuickSortHuff private quickSortHuff;
     QuickSortHuff private dsSort;
 
@@ -70,7 +72,14 @@ contract ContractTest is Test, Constants {
     }
 
     function testQuickSortHuffFuzz(uint256[] memory list) public {
+        vm.assume(list.length > 1);
         uint256[] memory res = quickSortHuff.sort(list);
+        ensureCorrectOrder(res);
+    }
+
+    function testQuickSortFuzz(uint256[] memory list) public {
+        vm.assume(list.length > 1);
+        uint256[] memory res = dsSort.sort(list);
         ensureCorrectOrder(res);
     }
 
@@ -82,5 +91,15 @@ contract ContractTest is Test, Constants {
                 assertEq(res[i], res2[i]);
             }
         }
+    }
+
+    function testUintMax() public {
+        uint256[] memory list = new uint256[](3);
+        list[0] = type(uint256).max;
+        list[1] = 0;
+        list[2] = 1;
+        uint256[] memory res = quickSortHuff.sort(list);
+        assertEq(res[2], list[0]);
+        assertEq(res[1], list[2]);
     }
 }

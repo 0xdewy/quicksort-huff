@@ -15,5 +15,8 @@ To run tests:
     forge install && forge test
 ```
 
-### Safety
-This is extremely sketchy. Don't use for production. 
+### Warning
+
+The sort function cannot handle uint256.max as it is currently used as a flag to indicate that the list is sorted
+
+
