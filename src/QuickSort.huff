@@ -13,18 +13,17 @@
 #define macro SAFE_SUB1() = takes(1) returns(1) {
     // [uint]
     dup1 iszero iszero    // [uint != 0, uint]
+    0x20 mul
     swap1 sub
 }
 
 
 #define macro SUB1() = takes(1) returns(1) {
+   /*
    UINT_MAX()
    add
-}
-
-#define macro SUB4() = takes(1) returns(1) {
-    0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD
-    add
+   */
+   0x20 swap1 sub
 }
 
 // list starts at memory pos 0x0 (uses push0)
@@ -34,19 +33,19 @@
 
 #define macro ITEM_OFFSET() = takes(1) returns (1) {
     // [index]
-    0x05 shl          // [index * 32]
-    0x40 add
+    // 0x05 shl          // [index * 32]
+    // 0x40 add
 }
 
 #define macro GET_ITEM() = takes(1) returns (1) {
     // [index]
-    ITEM_OFFSET()
+    // ITEM_OFFSET()
     mload                       // [item]
 }
 
 #define macro GET_ITEM_AND_OFFSET() = takes(1) returns (2) {
     // [index]
-    ITEM_OFFSET()
+    // ITEM_OFFSET()
     dup1 mload              // [item, offset]
 }
 
@@ -91,8 +90,13 @@
     0x20 mload                                 // [length]
     // If array length < 2 no sorting required. return array
     dup1 0x02 gt return_array jumpi
-    SUB1()                                     // [right] (length - 1)
+
+    // index for the last element (i * 32) + 64 bytes for array offset
+    SUB1()                                    // [right] (length - 1)
+    0x05 shl                                  // [right * 32]
+    0x40 add                                  // [right]
     
+    // left = 0
     __VERBATIM(0x5f)                           // [left, right]
 
     quicksort jump
