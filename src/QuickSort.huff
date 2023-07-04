@@ -8,23 +8,13 @@
 /*
     the cost of having a conditional is greater than the cost of the extra operations
     this is equivalent to:
-    i -= (i != 0)
+    i =  i - (i != 0)
 */
 #define macro SAFE_SUB1() = takes(1) returns(1) {
     // [uint]
     dup1 iszero iszero    // [uint != 0, uint]
-    swap1 sub
-}
-
-
-#define macro SUB1() = takes(1) returns(1) {
-   UINT_MAX()
-   add
-}
-
-#define macro SUB4() = takes(1) returns(1) {
-    0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD
-    add
+    0x20 mul              // [(uint != 0) * 32, uint]
+    swap1 sub             // [uint - (32|0)]
 }
 
 // list starts at memory pos 0x0 (uses push0)
@@ -32,34 +22,16 @@
    __VERBATIM(0x5f)
 }
 
-#define macro ITEM_OFFSET() = takes(1) returns (1) {
-    // [index]
-    0x05 shl          // [index * 32]
-    0x40 add
-}
-
-#define macro GET_ITEM() = takes(1) returns (1) {
-    // [index]
-    ITEM_OFFSET()
-    mload                       // [item]
-}
-
-#define macro GET_ITEM_AND_OFFSET() = takes(1) returns (2) {
-    // [index]
-    ITEM_OFFSET()
-    dup1 mload              // [item, offset]
-}
-
 #define macro SWAP_ITEMS() = takes(2) returns (2) {
-    // [a,b]
-    dup1 GET_ITEM_AND_OFFSET()       // [arr[a], offsetA, a, b ]
-    dup4 GET_ITEM_AND_OFFSET()       // [arr[b], offsetB, arr[a], offsetA, a, b]
-    swap2 swap1                      // [offsetB, arr[a], arr[b], offsetA, ]
-    // arr[b] = arr[a]     
-    mstore                           // [arr[b], offsetA, ]
-    swap1                            // [offsetA, arr[b], ]
-    // arr[a] = arr[b]
-    mstore                           // []
+    // [a, b]
+    dup1 mload                       // [arr[a], a, b]
+    dup3 mload                       // [arr[b], arr[a], a, b]
+
+    // store arr[b] to pos a
+    dup3 mstore                      // [arr[a], a, b]
+
+    // store arr[a] to pos b     
+    dup3 mstore                      // [a, b]
 }
 
 #define macro RETURN_ARRAY() = takes(0) returns (0) {
@@ -68,6 +40,7 @@
 
 #define macro IS_FINISHED() = takes(1) returns (1) {
     dup1 END_OPS() eq iszero not_finished jumpi
+
     RETURN_ARRAY()
 
     not_finished:
@@ -91,54 +64,69 @@
     0x20 mload                                 // [length]
     // If array length < 2 no sorting required. return array
     dup1 0x02 gt return_array jumpi
-    SUB1()                                     // [right] (length - 1)
+
+    // get length - 1
+    UINT_MAX() add                                // [right] (length - 1)
+
+    // index for the first element (i * 32) + 64 bytes for array offset
+    0x05 shl                                  // [right * 32]
+    0x40 add                                  // [right]
     
-    __VERBATIM(0x5f)                           // [left, right]
+    // left = 0, add 64 bytes for array offset
+    0x40                                       // [left, right]
 
-    quicksort jump
-
-    return_array:
-        RETURN_ARRAY()
-
-
-    // uint pivot = arr[uint(left + (right - left) / 2)];
     quicksort:                                 // [left, right, END]
         // check if the array is sorted
+        
         IS_FINISHED()                          // [left, right]
 
         // calculate the pivot point
+        // uint pivot = arr[uint(left + (right - left) / 2)];
         dup1 dup3                              // [right, left, left, right]
         sub                                    // [right - left, left, right]
-        0x01 shr dup2 add                      // [right-left / 2 + left, left, fight]
-        GET_ITEM()                             // [pivot, left, right]
+        0x01 shr                               // [(right - left) / 2, left, right] 
+        dup2 add                               // [left + (right - left) / 2, left, right] 
+        0x20 dup2 mod add                     // [left + (right - left) / 2, left, right]
+        mload                                 // [pivot, left, right]
 
         // int i = left;
         dup2                                   // [i, pivot, left, right, END]
         // int j = right;
         dup4                                   // [j, i, pivot, left, right, END]
 
-    // while (arr[i] < pivot) i++;
+        // TODO: is it possible to hit this?
+        // dup2 dup2 eq return_array jumpi        // [j, i, pivot, left, right, END]
+
     increment_i:                               // [j, i, pivot, left, right]
         dup3                                   // [pivot, j, i, pivot, left, right]
-        dup3 GET_ITEM()                        // [arr[i], pivot, j, i, pivot, left, right]
+        dup3 mload                            // [arr[i], pivot, j, i, pivot, left, right]
+        // while (arr[i] < pivot) i++;
+        /* TODO: i is getting incremented beyond the array length so arr[i] == 0
+            0 will always be less than the pivot, unless the pivot happens to be 0
+        */
         lt iszero decrement_j jumpi
         // i++
-        swap1 0x01 add                         // [i++, j, pivot, left, right]
+        swap1 0x20 add                         // [i++, j, pivot, left, right]
         swap1                                  // [j, i, pivot, left, right]
+
+        // TODO: this is a temporary fix to prevent an infinite loop
+        calldatasize dup3 gt return_array jumpi
+        
         increment_i jump
 
     j_minus_minus:
         // j--
         SAFE_SUB1()                            // [j--, i, pivot, left, right]
 
-    // while (pivot < arr[uint(j)]) j--;
     decrement_j:                               // [j, i, pivot, left, right]
-        dup1 GET_ITEM()                        // [arr[j], j, i, pivot, left, right]
+        dup1 mload                             // [arr[j], j, i, pivot, left, right]
         dup4                                   // [pivot, arr[j], j, i, pivot, left, right]
+        // while (pivot < arr[uint(j)]) j--;
         lt j_minus_minus jumpi                 // [j, i, pivot, left, right]
+
+        // if i > j, exit this loop
         dup1 dup3                              // [i, j, j, i, pivot, left, right]
-        // if (i <= j) {
-        gt add_to_stack_right jumpi
+        gt add_to_stack_right jumpi            // [j, i, pivot, left, right]
 
         // (arr[uint(i)], arr[uint(j)]) = (arr[uint(j)], arr[uint(i)]);
         SWAP_ITEMS()                           // [j, i, pivot, left, right]
@@ -147,24 +135,25 @@
         SAFE_SUB1() swap1                      // [i, j--, pivot, left, right]
 
         // i++;
-        0x01 add swap1                         // [j--, i++, pivot, left, right]
+        0x20 add swap1                         // [j--, i++, pivot, left, right]
 
         increment_i jump
 
 
-
-
     // if (i < right)
     add_to_stack_right:                        // [j, i, pivot left, right]
+        // if (i < right) leave right + i on stack
         dup5 dup3                              // [i, right, j, i, pivot, left, right]
-        lt push_stack jumpi                    // [j, i, pivot, left, right]
+        lt prepare_stack jumpi                    // [j, i, pivot, left, right]
+        
+        // otherwise remove [right + i] from stack
         swap4                                  // [right, i, pivot, left, j]
         pop pop pop                            // [left, j]
         add_to_stack_left jump
 
 
     // quickSort(arr, i, right);
-    push_stack:                                // [j, i, pivot, left, right]
+    prepare_stack:                                // [j, i, pivot, left, right]
         swap2                                  // [pivot, i, j, left, right]
         pop                                    // [i, j, left, right]
         swap2                                  // [left, j, i, right]
@@ -176,6 +165,11 @@
         lt quicksort jumpi                     // [left, j] 
         pop pop
         quicksort jump
+
+    // array is sorted
+    return_array:
+        RETURN_ARRAY()
+
 }
 
 #define macro MAIN() = takes(0) returns(0) {

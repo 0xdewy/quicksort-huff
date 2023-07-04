@@ -7,9 +7,7 @@ import {HuffDeployer} from "foundry-huff/HuffDeployer.sol";
 import {DsSort} from "../src/DsSort.sol";
 
 interface QuickSortHuff {
-    function sort(
-        uint256[] calldata array
-    ) external view returns (uint256[] memory);
+    function sort(uint256[] calldata array) external view returns (uint256[] memory);
 }
 
 contract QuicksortHuffTest is Test, Constants {
@@ -46,7 +44,7 @@ contract QuicksortHuffTest is Test, Constants {
 
     function testQuickSortHuff() public {
         uint256 gasBefore = gasleft();
-        uint256[] memory reverseSorted = quickSortHuff.sort(reverseListLarge);
+        uint256[] memory reverseSorted = quickSortHuff.sort(randomArray);
         uint256 gasAfter = gasBefore - gasleft();
         emit GasUsed(gasAfter, "HuffQuickSort::reverse");
         ensureCorrectOrder(reverseSorted);
@@ -54,9 +52,10 @@ contract QuicksortHuffTest is Test, Constants {
 
     function testQuickSort() public {
         uint256 gasBefore = gasleft();
-        dsSort.sort(reverseListLarge);
+        uint256[] memory reverseSorted = dsSort.sort(randomArray);
         uint256 gasAfter = gasBefore - gasleft();
         emit GasUsed(gasAfter, "DsSort::reverse");
+        ensureCorrectOrder(reverseSorted);
     }
 
     function testNoItem() public {
