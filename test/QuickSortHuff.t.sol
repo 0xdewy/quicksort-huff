@@ -92,6 +92,36 @@ contract QuicksortHuffTest is Test, Constants {
         }
     }
 
+    function testRandomLarge() public {
+        ensureCorrectOrder(quickSortHuff.sort(randomListLarge));
+    }
+
+    function testReverseLarge() public {
+        ensureCorrectOrder(quickSortHuff.sort(reverseListLarge));
+    }
+
+    // 0, 1, 2, ..., n/2, ..., 2, 1: worst case for a plain middle pivot
+    function testOrganPipe() public {
+        uint256 n = 1000;
+        uint256[] memory list = new uint256[](n);
+        for (uint256 i = 0; i < n; i++) {
+            list[i] = i < n - i ? i : n - i;
+        }
+        ensureCorrectOrder(quickSortHuff.sort(list));
+    }
+
+    function testAllEqual() public {
+        uint256[] memory list = new uint256[](100);
+        for (uint256 i = 0; i < list.length; i++) {
+            list[i] = type(uint256).max;
+        }
+        uint256[] memory res = quickSortHuff.sort(list);
+        assertEq(res.length, list.length);
+        for (uint256 i = 0; i < res.length; i++) {
+            assertEq(res[i], type(uint256).max);
+        }
+    }
+
     function testUintMax() public {
         uint256[] memory list = new uint256[](3);
         list[0] = type(uint256).max;

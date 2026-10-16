@@ -1,182 +1,174 @@
 #define function sort(uint256[]) pure returns (uint256[])
-#define function returnArray(uint256[]) pure returns (uint256[])
-
-#define macro UINT_MAX() = takes(0) returns(1) {
-    0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-}
 
 /*
-    the cost of having a conditional is greater than the cost of the extra operations
-    this is equivalent to:
-    i =  i - (i != 0)
+    Memory layout (the calldata minus the selector, copied to 0x00):
+        0x00          ABI offset (0x20)
+        0x20          array length
+        0x40 + 32*k   arr[k]
+        END           = 0x40 + 32*n = calldatasize - 4
+
+    All indices below are memory pointers (0x40 + 32*k), so no index math is
+    needed inside the loops.
+
+    Algorithm:
+      1. Quicksort (Hoare partition, middle pivot) using the EVM stack as the
+         call stack. Ranges with <= THRESHOLD / 32 items are left unsorted.
+         The smaller side is always handled first, so the stack holds at most
+         log2(n) pending ranges.
+      2. One insertion sort pass over the whole array. Every item is at most a
+         few slots from its final place, so this is cheap, and it needs no
+         bounds checks thanks to two sentinels.
 */
-#define macro SAFE_SUB1() = takes(1) returns(1) {
-    // [uint]
-    dup1 iszero iszero    // [uint != 0, uint]
-    0x20 mul              // [(uint != 0) * 32, uint]
-    swap1 sub             // [uint - (32|0)]
+
+// Ranges with (hi - lo) < THRESHOLD, i.e. at most THRESHOLD / 32 items, are
+// left to the final insertion sort. Must be >= 0x40.
+#define constant THRESHOLD = 0x200
+
+// -32 as a uint256, so `[NEG_32] add` is a 2-op decrement
+#define constant NEG_32 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0
+
+#define macro ZERO() = takes(0) returns(1) {
+    __VERBATIM(0x5f)
 }
 
-// list starts at memory pos 0x0 (uses push0)
-#define macro ARRAY_MEMORY_SLOT() = takes(0) returns(1)  {
-   __VERBATIM(0x5f)
-}
+#define macro SORT() = takes(0) returns(0) {
+    0x04 calldatasize sub                    // [end]
+    dup1 0x04 ZERO() calldatacopy            // [end]
+    ZERO()                                   // [0, end]          0 marks the bottom of the range stack
+    0x20 dup3 sub                            // [hi, 0, end]      hi = end - 32 (last item)
+    0x40                                     // [lo, hi, 0, end]
 
-#define macro SWAP_ITEMS() = takes(2) returns (2) {
-    // [a, b]
-    dup1 mload                       // [arr[a], a, b]
-    dup3 mload                       // [arr[b], arr[a], a, b]
+    // [lo, hi, ...pending ranges..., 0, end]
+    // a range of unknown size: skip it if it is small
+    qs:
+        dup2 dup2 [THRESHOLD] add gt         // [lo + T > hi, lo, hi]
+        next_range jumpi                     // [lo, hi]
 
-    // store arr[b] to pos a
-    dup3 mstore                      // [arr[a], a, b]
+    // a range with more than THRESHOLD / 32 items
+    partition:                               // [lo, hi]
+        // median of three: sort arr[lo], arr[mid], arr[hi] in place and use
+        // the middle one as pivot. arr[lo] <= pivot <= arr[hi] then bound
+        // both scans, so they can start at lo + 32 and hi - 32.
+        dup2 dup2 add 0x06 shr 0x05 shl      // [mid, lo, hi]               mid = floor((lo + hi) / 64) * 32
+        dup3 mload dup2 mload dup4 mload     // [a, b, c, mid, lo, hi]      a = arr[lo], b = arr[mid], c = arr[hi]
+        // each compare-swap leaves the smaller value on top
+        dup2 dup2 gt iszero sorted_ab jumpi
+        swap1
+    sorted_ab:                               // [min(a,b), max(a,b), c, ...]
+        swap2                                // [c, max(a,b), min(a,b), ...]
+        dup2 dup2 gt iszero sorted_bc jumpi
+        swap1
+    sorted_bc:                               // [x, max, y, mid, lo, hi]
+        swap1 dup6 mstore                    // [x, y, mid, lo, hi]         arr[hi] = max
+        dup2 dup2 gt iszero sorted_ac jumpi
+        swap1
+    sorted_ac:                               // [min, median, mid, lo, hi]
+        dup4 mstore                          // arr[lo] = min
+        dup1 swap2 mstore                    // [pivot, lo, hi]             arr[mid] = median
+        dup3                                 // [j, pivot, lo, hi]          j = hi
+        dup3                                 // [i, j, pivot, lo, hi]       i = lo
+        scan_i jump
 
-    // store arr[a] to pos b     
-    dup3 mstore                      // [a, b]
-}
+    swap_items:                              // [j, i, pivot, lo, hi]
+        dup1 mload dup3 mload                // [arr[i], arr[j], j, i, pivot, lo, hi]
+        dup3 mstore                          // [arr[j], j, i, pivot, lo, hi]
+        dup3 mstore                          // [j, i, pivot, lo, hi]
+        swap1                                // [i, j, pivot, lo, hi]
 
-#define macro RETURN_ARRAY() = takes(0) returns (0) {
-    calldatasize ARRAY_MEMORY_SLOT() return
-}
+    // do i += 32 while (arr[i] < pivot)
+    scan_i:                                  // [i, j, pivot, lo, hi]
+        0x20 add
+        dup1 mload dup4 gt scan_i jumpi
+        swap1                                // [j, i, pivot, lo, hi]
 
-#define macro IS_FINISHED() = takes(1) returns (1) {
-    dup1 END_OPS() eq iszero not_finished jumpi
+    // do j -= 32 while (arr[j] > pivot)
+    scan_j:                                  // [j, i, pivot, lo, hi]
+        [NEG_32] add
+        dup1 mload dup4 lt scan_j jumpi
 
-    RETURN_ARRAY()
+        // if (i < j) swap and keep going
+        dup1 dup3 lt swap_items jumpi        // [j, i, pivot, lo, hi]
 
-    not_finished:
-}
+        // partitioned: [lo, j] <= pivot <= [j + 32, hi]
+        swap2 pop pop                        // [j, lo, hi]
+        dup1 dup4 sub                        // [hi - j, j, lo, hi]
+        dup3 dup3 sub                        // [j - lo, hi - j, j, lo, hi]
+        lt left_smaller jumpi                // [j, lo, hi]
 
-// TODO: Use memory to flag when to return
-#define macro END_OPS() = takes(1) returns(1) {
-    UINT_MAX()
-}
+        // right side is smaller (or equal)
+        0x20 add                             // [rlo, lo, hi]               rlo = j + 32
+        dup3 dup2 [THRESHOLD] add gt         // [rlo + T > hi, rlo, lo, hi]
+        drop_right jumpi                     // [rlo, lo, hi]
+        // both sides are big: save the left one, sort the right one next
+        swap2                                // [hi, lo, rlo]
+        [NEG_32] dup4 add                    // [rlo - 32, hi, lo, rlo]
+        swap3                                // [rlo, hi, lo, j]
+        partition jump
 
+    drop_right:                              // [rlo, lo, hi]
+        [NEG_32] add                         // [j, lo, hi]
+        swap2 pop                            // [lo, j]
+        qs jump
 
-#define macro SORT() = takes(0) returns (0) {
-    // Store array in memory
-    calldatasize                               // [numBytes]
-    0x04 ARRAY_MEMORY_SLOT()                   // [memTo, calldataFrom, numBytes]
-    calldatacopy
-    // Flag to signal end of stack
-    // TODO: store counter to signal when recursion is done
-    END_OPS()
-    // Load array length
-    0x20 mload                                 // [length]
-    // If array length < 2 no sorting required. return array
-    dup1 0x02 gt return_array jumpi
+    left_smaller:                            // [j, lo, hi]
+        dup1 dup3 [THRESHOLD] add gt         // [lo + T > j, j, lo, hi]
+        drop_left jumpi                      // [j, lo, hi]
+        // both sides are big: save the right one, sort the left one next
+        dup1 0x20 add swap2                  // [lo, j, j + 32, hi]
+        partition jump
 
-    // get length - 1
-    UINT_MAX() add                                // [right] (length - 1)
+    drop_left:                               // [j, lo, hi]
+        0x20 add swap1 pop                   // [j + 32, hi]
+        qs jump
 
-    // index for the first element (i * 32) + 64 bytes for array offset
-    0x05 shl                                  // [right * 32]
-    0x40 add                                  // [right]
-    
-    // left = 0, add 64 bytes for array offset
-    0x40                                       // [left, right]
+    // current range is done: pop the next one. Saved ranges are always big.
+    next_range:                              // [lo, hi, nlo, nhi, ...]
+        pop pop                              // [nlo, nhi, ...] or [0, end]
+        dup1 partition jumpi
 
-    quicksort:                                 // [left, right, END]
-        // check if the array is sorted
-        
-        IS_FINISHED()                          // [left, right]
+    // Insertion sort over the whole array.
+    // Sentinels: arr[-1] = 0 (the length slot) stops the inner loop at the
+    // start, arr[n] = uint max stops the outer loop at the end.
+                                             // [0, end]
+    0x20 mstore                              // [end]
+    ZERO() not dup2 mstore                   // [end]
+    ZERO() 0x20                              // [p, max, end]   max = largest item so far
 
-        // calculate the pivot point
-        // uint pivot = arr[uint(left + (right - left) / 2)];
-        dup1 dup3                              // [right, left, left, right]
-        sub                                    // [right - left, left, right]
-        0x01 shr                               // [(right - left) / 2, left, right] 
-        dup2 add                               // [left + (right - left) / 2, left, right] 
-        0x20 dup2 mod add                     // [left + (right - left) / 2, left, right]
-        mload                                 // [pivot, left, right]
+    outer:                                   // [p, max, end]
+        0x20 add
+        dup1 mload                           // [v, p, max, end]
+        dup1 dup4 gt insert jumpi            // [v, p, max, end]
+        // v >= max: already in place
+        swap2 pop                            // [p, max = v, end]
+        dup3 dup2 lt outer jumpi             // [p, max, end]
 
-        // int i = left;
-        dup2                                   // [i, pivot, left, right, END]
-        // int j = right;
-        dup4                                   // [j, i, pivot, left, right, END]
+    // done (p == end, reached the uint max sentinel)
+    pop pop                                  // [end]
+    0x24 calldataload 0x20 mstore            // restore the length
+    ZERO() return
 
-        // TODO: is it possible to hit this?
-        // dup2 dup2 eq return_array jumpi        // [j, i, pivot, left, right, END]
+    // v < max = arr[p - 32]: shift bigger items up by one and drop v in the gap
+    insert:                                  // [v, p, max, end]
+        dup3 dup3 mstore                     // arr[p] = max
+        0x20 dup3 sub                        // [h, v, p, max, end]         h = gap
+        0x20 dup2 sub dup1 mload             // [w, h - 32, h, v, ...]
+        dup4 dup2 gt shift jumpi             // w > v ?
+        pop pop mstore                       // arr[h] = v
+        outer jump
 
-    increment_i:                               // [j, i, pivot, left, right]
-        dup3                                   // [pivot, j, i, pivot, left, right]
-        dup3 mload                            // [arr[i], pivot, j, i, pivot, left, right]
-        // while (arr[i] < pivot) i++;
-        /* TODO: i is getting incremented beyond the array length so arr[i] == 0
-            0 will always be less than the pivot, unless the pivot happens to be 0
-        */
-        lt iszero decrement_j jumpi
-        // i++
-        swap1 0x20 add                         // [i++, j, pivot, left, right]
-        swap1                                  // [j, i, pivot, left, right]
-
-        // TODO: this is a temporary fix to prevent an infinite loop
-        calldatasize dup3 gt return_array jumpi
-        
-        increment_i jump
-
-    j_minus_minus:
-        // j--
-        SAFE_SUB1()                            // [j--, i, pivot, left, right]
-
-    decrement_j:                               // [j, i, pivot, left, right]
-        dup1 mload                             // [arr[j], j, i, pivot, left, right]
-        dup4                                   // [pivot, arr[j], j, i, pivot, left, right]
-        // while (pivot < arr[uint(j)]) j--;
-        lt j_minus_minus jumpi                 // [j, i, pivot, left, right]
-
-        // if i > j, exit this loop
-        dup1 dup3                              // [i, j, j, i, pivot, left, right]
-        gt add_to_stack_right jumpi            // [j, i, pivot, left, right]
-
-        // (arr[uint(i)], arr[uint(j)]) = (arr[uint(j)], arr[uint(i)]);
-        SWAP_ITEMS()                           // [j, i, pivot, left, right]
-
-        // j--;
-        SAFE_SUB1() swap1                      // [i, j--, pivot, left, right]
-
-        // i++;
-        0x20 add swap1                         // [j--, i++, pivot, left, right]
-
-        increment_i jump
-
-
-    // if (i < right)
-    add_to_stack_right:                        // [j, i, pivot left, right]
-        // if (i < right) leave right + i on stack
-        dup5 dup3                              // [i, right, j, i, pivot, left, right]
-        lt prepare_stack jumpi                    // [j, i, pivot, left, right]
-        
-        // otherwise remove [right + i] from stack
-        swap4                                  // [right, i, pivot, left, j]
-        pop pop pop                            // [left, j]
-        add_to_stack_left jump
-
-
-    // quickSort(arr, i, right);
-    prepare_stack:                                // [j, i, pivot, left, right]
-        swap2                                  // [pivot, i, j, left, right]
-        pop                                    // [i, j, left, right]
-        swap2                                  // [left, j, i, right]
-
-    add_to_stack_left:                         // [left, j]
-        // if (left < j)
-        // If less, keep [left, j] on the stack
-        dup2 dup2                              // [left, j, left, j]
-        lt quicksort jumpi                     // [left, j] 
-        pop pop
-        quicksort jump
-
-    // array is sorted
-    return_array:
-        RETURN_ARRAY()
-
+    shift:                                   // [w, h - 32, h, v, ...]
+        swap1 swap2 mstore                   // arr[h] = w;  [h - 32, v, ...]
+        0x20 dup2 sub dup1 mload             // [w, h - 32, h, v, ...]
+        dup4 dup2 gt shift jumpi
+        pop pop mstore                       // arr[h] = v
+        outer jump
 }
 
 #define macro MAIN() = takes(0) returns(0) {
-    __VERBATIM(0x5f) calldataload 0xE0 shr
+    ZERO() calldataload 0xE0 shr
+    __FUNC_SIG(sort) eq sort_jump jumpi
+    ZERO() ZERO() revert
 
-    dup1 __FUNC_SIG(sort)       eq  sortJump    jumpi
-
-    sortJump:
+    sort_jump:
         SORT()
 }
